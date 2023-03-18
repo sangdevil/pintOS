@@ -7,6 +7,7 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "lib/kernel/list.h"
 
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -23,6 +24,8 @@ static int64_t ticks;
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
+
+static struct list sleeping_threads;
 
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
@@ -41,6 +44,8 @@ timer_init (void) {
 	outb (0x43, 0x34);    /* CW: counter 0, LSB then MSB, mode 2, binary. */
 	outb (0x40, count & 0xff);
 	outb (0x40, count >> 8);
+
+	list_init(&sleeping_threads);
 
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 }
@@ -87,14 +92,34 @@ timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
+/* One semaphore in a list. from synch.c */ 
+struct semaphore_elem {
+	struct list_elem elem;              /* List element. */
+	struct semaphore sema;         /* This semaphore. */
+};
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
+	if(ticks <= 0) return;
+
 	int64_t start = timer_ticks ();
 
 	ASSERT (intr_get_level () == INTR_ON);
+	/*
 	while (timer_elapsed (start) < ticks)
 		thread_yield ();
+	*/	
+	struct thread *t = thread_current();
+	struct semaphore_elem se;
+	sema_init(&se.sema, 0);
+	t->wakeup_time = start + ticks;
+	enum intr_level old_level = intr_disable ();
+	list_push_back(&sleeping_threads, &se.elem);
+	//printf("(Time: %d) I'm now sleeping for %d ticks, tid = %d\n", start, ticks, t->tid);
+	//printf("list size = %d\n", list_size(&sleeping_threads));
+	sema_down(&se.sema);
+	intr_set_level(old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -120,12 +145,36 @@ void
 timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
-
+
+static void
+timer_wakeup(void) {
+	//printf("timer_wakeup()");
+	struct list_elem *e = list_begin(&sleeping_threads);
+	//printf("list size = %d\n", list_size(&sleeping_threads));
+	while(e != list_end(&sleeping_threads)) {
+		struct semaphore_elem *se = list_entry (e, struct semaphore_elem, elem);
+		struct semaphore *sema = &se->sema;
+		struct thread *t = list_entry(list_front(&sema->waiters), struct thread, elem);
+		int64_t wakeup_time = t->wakeup_time;
+		//printf("wakeup time = %d, timer ticks = %d\n", wakeup_time, timer_ticks());
+		if(wakeup_time <= timer_ticks()) {
+			//printf("Waking thread %d up.\n", t->tid);
+			sema_up(sema);
+			e = list_remove(e);
+		}
+		else {
+			e = list_next(e);
+		}
+	}
+}
+
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
+	//printf("timer_interrupt()");
 	ticks++;
 	thread_tick ();
+	timer_wakeup();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

@@ -32,10 +32,11 @@ extern test_func test_mlfqs_fair_20;
 extern test_func test_mlfqs_nice_2;
 extern test_func test_mlfqs_nice_10;
 extern test_func test_mlfqs_block;
+extern test_func test_hello;
 
-void msg (const char *, ...);
-void fail (const char *, ...);
-void pass (void);
+    void msg (const char *, ...);
+    void fail (const char *, ...);
+    void pass (void);
 
-#endif /* tests/threads/tests.h */
+    #endif /* tests/threads/tests.h */
 
