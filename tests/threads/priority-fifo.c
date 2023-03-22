@@ -55,7 +55,7 @@ test_priority_fifo (void)
     {
       char name[16];
       struct simple_thread_data *d = data + i;
-      snprintf (name, sizeof name, "%d", i);
+      snprintf (name, sizeof name, "%d", i+1);
       d->id = i;
       d->iterations = 0;
       d->lock = &lock;
@@ -82,7 +82,6 @@ test_priority_fifo (void)
       d->iterations++;
     }
 }
-
 static void 
 simple_thread_func (void *data_) 
 {

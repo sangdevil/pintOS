@@ -92,12 +92,6 @@ timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
-/* One semaphore in a list. from synch.c */ 
-struct semaphore_elem {
-	struct list_elem elem;              /* List element. */
-	struct semaphore sema;         /* This semaphore. */
-};
-
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
@@ -111,14 +105,15 @@ timer_sleep (int64_t ticks) {
 		thread_yield ();
 	*/	
 	struct thread *t = thread_current();
-	struct semaphore_elem se;
-	sema_init(&se.sema, 0);
+	//struct semaphore_elem se;
+	struct semaphore sema;
+	sema_init(&sema, 0);
 	t->wakeup_time = start + ticks;
 	enum intr_level old_level = intr_disable ();
-	list_push_back(&sleeping_threads, &se.elem);
+	list_push_back(&sleeping_threads, &sema.elem);
 	//printf("(Time: %d) I'm now sleeping for %d ticks, tid = %d\n", start, ticks, t->tid);
 	//printf("list size = %d\n", list_size(&sleeping_threads));
-	sema_down(&se.sema);
+	sema_down(&sema);
 	intr_set_level(old_level);
 }
 
@@ -149,23 +144,26 @@ timer_print_stats (void) {
 static void
 timer_wakeup(void) {
 	//printf("timer_wakeup()");
-	struct list_elem *e = list_begin(&sleeping_threads);
+	bool wakeup = false;
+	struct list_elem *sema_elem = list_begin(&sleeping_threads);
 	//printf("list size = %d\n", list_size(&sleeping_threads));
-	while(e != list_end(&sleeping_threads)) {
-		struct semaphore_elem *se = list_entry (e, struct semaphore_elem, elem);
-		struct semaphore *sema = &se->sema;
+	while(sema_elem != list_end(&sleeping_threads)) {
+		struct semaphore *sema = list_entry (sema_elem, struct semaphore, elem);
+		//struct semaphore *sema = &se->semaphore;
 		struct thread *t = list_entry(list_front(&sema->waiters), struct thread, elem);
 		int64_t wakeup_time = t->wakeup_time;
 		//printf("wakeup time = %d, timer ticks = %d\n", wakeup_time, timer_ticks());
 		if(wakeup_time <= timer_ticks()) {
 			//printf("Waking thread %d up.\n", t->tid);
+			wakeup = true;
 			sema_up(sema);
-			e = list_remove(e);
+			sema_elem = list_remove(sema_elem);
 		}
 		else {
-			e = list_next(e);
+			sema_elem = list_next(sema_elem);
 		}
 	}
+	if(wakeup) intr_yield_on_return(); //yields iff timer_wakeup has woken up one or more threads
 }
 
 /* Timer interrupt handler. */

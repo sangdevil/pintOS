@@ -22,6 +22,7 @@ test_priority_sema (void)
 
   sema_init (&sema, 0);
   thread_set_priority (PRI_MIN);
+  //msg("my priority = %d\n", thread_get_priority());
   for (i = 0; i < 10; i++) 
     {
       int priority = PRI_DEFAULT - (i + 3) % 10 - 1;
@@ -40,6 +41,8 @@ test_priority_sema (void)
 static void
 priority_sema_thread (void *aux UNUSED) 
 {
+  //msg("my priority = %d\n", thread_get_priority());
+  //msg ("막았어용1");
   sema_down (&sema);
   msg ("Thread %s woke up.", thread_name ());
 }

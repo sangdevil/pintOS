@@ -10,6 +10,8 @@
 void
 test_alarm_zero (void) 
 {
+  //printf("Hi");
   timer_sleep (1);
+  //printf("Hi");
   pass ();
 }

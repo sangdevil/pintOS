@@ -33,9 +33,10 @@ test_alarm_priority (void)
     }
 
   thread_set_priority (PRI_MIN);
-
-  for (i = 0; i < 10; i++)
-    sema_down (&wait_sema);
+  for (i = 0; i < 10; i++) {
+        sema_down (&wait_sema);
+        // msg("아래, %d",i);
+  }
 }
 
 static void
