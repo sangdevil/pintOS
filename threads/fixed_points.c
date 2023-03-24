@@ -3,6 +3,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "threads/fixed_points.h"
 
 typedef int fixed_point_t;
 #define FIX 16384
@@ -21,7 +22,8 @@ int convert_to_int(fixed_point_t x) {
 fixed_point_t add(fixed_point_t x, fixed_point_t y){
     return x + y;
 }
-
+// 여기에 쓰고 있는데, 이거 보면 카톡으로 말해줘 
+// 페이커 짱짱맨 쵸비 짱짱맨 제카 짱짱껄
 fixed_point_t sub(fixed_point_t x, fixed_point_t y) {
     return x - y;
 }
@@ -32,6 +34,7 @@ fixed_point_t mul(fixed_point_t x, fixed_point_t y) {
     //     // Handle overflow error
     //     return ERROR_CODE;
     // }
+    //ASSERT(prod / FIX < 1LL<<31);
     return prod / FIX;
 }
 

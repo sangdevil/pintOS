@@ -25,7 +25,7 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
-static struct list sleeping_threads;
+struct list sleeping_threads;
 
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
@@ -171,7 +171,28 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	//printf("timer_interrupt()");
 	ticks++;
-	thread_tick ();
+	struct thread *t = thread_current();
+	if (thread_mlfqs) {
+		// for every interrupt
+		// if (!(strcmp(t->name, "idle") == 0)) {
+		t->recent_cpu = add(t->recent_cpu, convert_to_fix(1));
+		// }
+		// for every second
+		if (ticks % TIMER_FREQ == 0 ){
+			update_recent_cpu();
+			update_load_avg();
+		}
+		if (ticks % 4 == 0){
+			update_priority(); //update priority for all threads.
+			/*
+			int new_priority = PRI_MAX 
+			- convert_to_int(div(thread_current()->recent_cpu , convert_to_fix(4)))
+			- thread_current()-> nice * 2;
+			thread_set_priority(new_priority); //only when we test mlfqs
+			*/
+		}
+	}
+	thread_tick();
 	timer_wakeup();
 }
 
