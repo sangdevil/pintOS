@@ -98,12 +98,13 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
-
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
-	int64_t wakeup_time;
-	struct thread *waiting_for;
-	struct list lock_list; // list of locks.
+
+	int64_t wakeup_time;				/* time when this thread wakes up */
+	struct list lock_list; 				/* list of locks(semaphores) that this thread is holding */
+	fixed_point_t recent_cpu;           /* recent cpu value for this thread */
+	int nice;							/* nice value for this thread */
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -116,8 +117,6 @@ struct thread {
 
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */
-	fixed_point_t recent_cpu;           /* recent cpu 값은 thread 안에 넣음.*/
-	int nice;							/* nice 값은 int입니다. */
 	unsigned magic;                     /* Detects stack overflow. */
 
 };
@@ -153,6 +152,11 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+void increment_recent_cpu(void);
+void update_recent_cpu(void);
+void update_load_avg(void);
+void update_priority(void);
 
 void do_iret (struct intr_frame *tf);
 

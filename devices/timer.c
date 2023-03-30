@@ -100,19 +100,15 @@ timer_sleep (int64_t ticks) {
 	int64_t start = timer_ticks ();
 
 	ASSERT (intr_get_level () == INTR_ON);
-	/*
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
-	*/	
+
 	struct thread *t = thread_current();
-	//struct semaphore_elem se;
+
 	struct semaphore sema;
 	sema_init(&sema, 0);
 	t->wakeup_time = start + ticks;
 	enum intr_level old_level = intr_disable ();
 	list_push_back(&sleeping_threads, &sema.elem);
-	//printf("(Time: %d) I'm now sleeping for %d ticks, tid = %d\n", start, ticks, t->tid);
-	//printf("list size = %d\n", list_size(&sleeping_threads));
+
 	sema_down(&sema);
 	intr_set_level(old_level);
 }
@@ -143,18 +139,13 @@ timer_print_stats (void) {
 
 static void
 timer_wakeup(void) {
-	//printf("timer_wakeup()");
 	bool wakeup = false;
 	struct list_elem *sema_elem = list_begin(&sleeping_threads);
-	//printf("list size = %d\n", list_size(&sleeping_threads));
 	while(sema_elem != list_end(&sleeping_threads)) {
 		struct semaphore *sema = list_entry (sema_elem, struct semaphore, elem);
-		//struct semaphore *sema = &se->semaphore;
 		struct thread *t = list_entry(list_front(&sema->waiters), struct thread, elem);
 		int64_t wakeup_time = t->wakeup_time;
-		//printf("wakeup time = %d, timer ticks = %d\n", wakeup_time, timer_ticks());
 		if(wakeup_time <= timer_ticks()) {
-			//printf("Waking thread %d up.\n", t->tid);
 			wakeup = true;
 			sema_up(sema);
 			sema_elem = list_remove(sema_elem);
@@ -169,27 +160,18 @@ timer_wakeup(void) {
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
-	//printf("timer_interrupt()");
 	ticks++;
-	struct thread *t = thread_current();
 	if (thread_mlfqs) {
 		// for every interrupt
-		// if (!(strcmp(t->name, "idle") == 0)) {
-		t->recent_cpu = add(t->recent_cpu, convert_to_fix(1));
-		// }
+		increment_recent_cpu();
+
 		// for every second
 		if (ticks % TIMER_FREQ == 0 ){
-			update_recent_cpu();
 			update_load_avg();
+			update_recent_cpu();
 		}
 		if (ticks % 4 == 0){
 			update_priority(); //update priority for all threads.
-			/*
-			int new_priority = PRI_MAX 
-			- convert_to_int(div(thread_current()->recent_cpu , convert_to_fix(4)))
-			- thread_current()-> nice * 2;
-			thread_set_priority(new_priority); //only when we test mlfqs
-			*/
 		}
 	}
 	thread_tick();

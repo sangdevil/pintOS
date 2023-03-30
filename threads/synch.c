@@ -56,12 +56,12 @@ compare_priority(struct list_elem *left, struct list_elem *right, void *aux) {
 	return _thread_get_priority(t1) < _thread_get_priority(t2);
 }
 
-bool 
-compare_priority_reverse(struct list_elem *left, struct list_elem *right, void *aux) {
-	struct thread *t1 = list_entry(left, struct thread, elem);
-	struct thread *t2 = list_entry(right, struct thread, elem);
-	return _thread_get_priority(t1) > _thread_get_priority(t2);
-}
+// bool 
+// compare_priority_reverse(struct list_elem *left, struct list_elem *right, void *aux) {
+// 	struct thread *t1 = list_entry(left, struct thread, elem);
+// 	struct thread *t2 = list_entry(right, struct thread, elem);
+// 	return _thread_get_priority(t1) > _thread_get_priority(t2);
+// }
 
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
@@ -122,15 +122,15 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 	old_level = intr_disable ();
 	struct thread *next = NULL;
-		// waiter에 있는 스레드 중에서 가장 pri가 높은 한 놈 실행
+		// unblocks a thread in the waiters list with the highest priority
 	if (!list_empty (&sema->waiters)) {
 		next = list_entry(list_max (&sema->waiters, compare_priority, NULL), struct thread, elem);
 		list_remove (&next->elem);
 		thread_unblock (next);
 	}
 	sema->value++;
-	// interrupt handler가 실행 중인 도중에, 스레드를 새로 실행(yield)하면 안 됨, !intr_context() 조건 필요;
-	
+
+	// should not call thread_yield() when interrupt handler is running
 	if(!intr_context() && next != NULL && next->priority > thread_current()->priority) {
 		thread_yield();
 	}
@@ -194,19 +194,7 @@ lock_init (struct lock *lock) {
 	lock->holder = NULL;
 	sema_init (&lock->semaphore, 1);
 }
-// recursive하게 기부 받은 스레드가 기다리고 있는 스레드들도 전부 기부하도록 변경
-void
-donate_priority(struct thread *donor, struct thread *donee) {
-	if(_thread_get_priority(donor) > _thread_get_priority(donee)) {
-		//donee->priority = donor->priority;
-		// pri_t *pri = malloc(sizeof(pri_t)); //must be freed
-		// pri->priority = donor->priority;
-		// list_insert_ordered(&donee->priorities, &pri->elem, compare_priority_reverse, NULL);
-		if (donee->waiting_for != NULL) {
-			donate_priority(donee, donee->waiting_for);
-		}
-	} 
-}
+
 int acquire, release;
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
@@ -225,15 +213,9 @@ lock_acquire (struct lock *lock) {
 
 	enum intr_level old_level = intr_disable();
 	struct thread *t = thread_current();
-	if(lock->holder != NULL) { //donate priority.
-		t->waiting_for = lock->holder;
-		//donate_priority(t, t->waiting_for);
-		//msg("Oops.."); //no such case.
-	}
 	sema_down (&lock->semaphore);
-	t->waiting_for = NULL;
+
 	lock->holder = t;
-	
 	list_push_back(&t->lock_list, &lock->semaphore.elem);
 	intr_set_level(old_level);
 }
@@ -352,8 +334,6 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	if (!list_empty (&cond->waiters)) {
-		// sema_up (&list_entry (list_pop_front (&cond->waiters),
-		// 			struct semaphore_elem, elem)->semaphore);
 		struct semaphore_elem *next = list_entry(list_max (&cond->waiters, compare_semaphore_elem, NULL), struct semaphore_elem, elem);
 		list_remove (&next->elem);
 		sema_up (&next->semaphore);

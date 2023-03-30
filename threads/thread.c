@@ -29,7 +29,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
-// static struct list block_list;
+
 extern struct list sleeping_threads;
 
 /* Idle thread. */
@@ -84,7 +84,7 @@ static tid_t allocate_tid (void);
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
 
-// load_avg는 여기에 정의해 줍니다.
+// defined load_avg here
 static fixed_point_t load_avg = 0;
 
 /* Initializes the threading system by transforming the code
@@ -116,14 +116,12 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
-	// list_init (&block_list);
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
 	initial_thread->status = THREAD_RUNNING;
-	// list_remove(&initial_thread->elem);
 	initial_thread->tid = allocate_tid ();
 }
 
@@ -144,7 +142,6 @@ thread_start (void) {
 
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
-// 여기서 load_avg를 업데이트 해야 할 것 같아서 여기서 수정합니다. 
 
 void
 thread_tick (void) {
@@ -215,15 +212,15 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG;
 	t->tf.eflags = FLAG_IF;
 
-	// nice와 recent_cpu 설정해줍시다.
+	// set nice and recent cpu values
 
 	t->nice = 0;
 	t->recent_cpu = 0;
-	// msg("지금 스레드 생성됨 : %s", name);
+
 	/* Add to run queue. */
 	thread_unblock (t);
 
-	thread_yield(); // 한번 지워봣음
+	thread_yield(); // the newly created thread may have higher priority than its parent.
 
 	return tid;
 }
@@ -240,8 +237,6 @@ thread_block (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
 	struct thread *cur = thread_current();
 	cur->status = THREAD_BLOCKED;
-	// list_remove(&cur->elem); // ready_list에서 빼자
-	// list_push_back(&block_list, &cur->elem);
 	schedule ();
 }
 
@@ -261,7 +256,6 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	// list_remove(&t->elem);
 	list_push_back (&ready_list, &t->elem);
 	
 	t->status = THREAD_READY;
@@ -287,7 +281,7 @@ thread_current (void) {
 	   of stack, so a few big automatic arrays or moderate
 	   recursion can cause stack overflow. */
 	ASSERT (is_thread (t));
-	ASSERT (t->status == THREAD_RUNNING); //schedule() call하는 함수에서 printf하면 여기서 fail.
+	ASSERT (t->status == THREAD_RUNNING); // if printf() is called inside a function that calls schedule(), it fails here.
 
 	return t;
 }
@@ -327,8 +321,7 @@ thread_yield (void) {
 	old_level = intr_disable ();
 	if (curr != idle_thread)
 		list_push_back (&ready_list, &curr->elem);
-		// list_sort(&ready_list, compare_priority_reverse, NULL);
-	// msg("지금 스레드의 우선순위는 %d", thread_current()->priority);
+
 	do_schedule (THREAD_READY);
 
 	intr_set_level (old_level);
@@ -339,13 +332,6 @@ void
 thread_set_priority (int new_priority) {
 	thread_current() -> priority = new_priority;
 	if(!intr_context())  {
-		// struct thread *cur = thread_current();
-		// if (cur->priority < new_priority) {
-		// 	cur->priority = new_priority;
-		// 	thread_yield();
-		// } else{
-		// 	cur->priority = new_priority;
-		// }
 		thread_yield();
 	}
 	else intr_yield_on_return();
@@ -354,7 +340,6 @@ thread_set_priority (int new_priority) {
 int max(int a, int b) {return a > b ? a : b;}
 
 int _thread_get_priority(struct thread *t) {
-	//enum intr_level old_level = intr_disable();
 	int priority = t->priority;
 	
 	if(!thread_mlfqs) {
@@ -366,29 +351,38 @@ int _thread_get_priority(struct thread *t) {
 			}
 		}
 	}
-	//intr_set_level(old_level);
+
 	return priority;
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
-	//return thread_current() -> priority;
 	if (thread_mlfqs) {
 		return thread_current()->priority;
 	} else {
 		return _thread_get_priority(thread_current());
 	}
-
 }
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) {
+thread_set_nice (int nice) {
 	/* TODO: Your implementation goes here */
 	if (thread_mlfqs) {
 		thread_current()->nice = nice;
-		int new_priority = PRI_MAX 
+		int new_priority = 
+			// convert_to_int(
+			// 	sub(
+			// 		sub(
+			// 			convert_to_fix(PRI_MAX), 
+			// 			div(thread_current()->recent_cpu, convert_to_fix(4))
+			// 		),
+			// 		convert_to_fix(nice * 2)
+			// 	)
+			// );
+			
+			PRI_MAX 
 			- convert_to_int(div(thread_current()->recent_cpu, convert_to_fix(4)))
 			- (nice * 2);
 		if (new_priority > 63) {
@@ -407,11 +401,30 @@ thread_get_nice (void) {
 	return thread_current()->nice;
 }
 
-void update_priority_blocked(struct thread *t) { //update itself, and blocked threads.
-	int new_priority = PRI_MAX 
+void update_priority_blocked(struct thread *t) { //updates itself, and all blocked threads waiting for it.
+	int new_priority = 
+			convert_to_int(
+				sub(
+					sub(
+						convert_to_fix(PRI_MAX), 
+						div(t->recent_cpu, convert_to_fix(4))
+					),
+					convert_to_fix(t->nice * 2)
+				)
+			);
+			/*
+			PRI_MAX 
 			- convert_to_int(div(t->recent_cpu , convert_to_fix(4)))
 			- t->nice * 2;
+			*/
+	if (new_priority > 63) {
+		new_priority = 63;
+	} else if (new_priority < 0) {
+		new_priority = 0;
+	}
 	t->priority = new_priority;
+	intr_yield_on_return(); //important!!
+	//thread_set_priority(new_priority);
 	
 	for(struct list_elem *sema_elem = list_begin(&t->lock_list); sema_elem != list_end(&t->lock_list); sema_elem = list_next(sema_elem)) {
 		struct semaphore *sema = list_entry(sema_elem, struct semaphore, elem);
@@ -441,15 +454,15 @@ void update_priority_sleeping() {
 	}
 }
 
-void update_priority() {
+inline void update_priority() {
 	update_priority_running();
 	update_priority_ready();
 	update_priority_sleeping();
 }
 
-// load_avg update 해주는 함수, load_avg는 17.14 형식 정수입니다.
+// updates load_avg. load_avg is a 17.14 fixed-point number.
 void
-update_load_avg(){
+update_load_avg() {
 	int ready_num;
 	if (thread_current() == idle_thread) {
 		ready_num = list_size(&ready_list);
@@ -465,21 +478,27 @@ update_load_avg(){
 int
 thread_get_load_avg (void) {
 	/* TODO: Your implementation goes here */
-
 	return convert_to_int( mul(convert_to_fix(100), load_avg));
+}
+
+void increment_recent_cpu() {
+	struct thread *t = thread_current();
+	if(t != idle_thread) {
+		t->recent_cpu = add(t->recent_cpu, convert_to_fix(1));
+	}
 }
 
 void update_recent_cpu_blocked (struct thread *t) {
 	if (t != idle_thread) {
-			fixed_point_t c = div(mul( convert_to_fix(2),load_avg),add(mul(convert_to_fix(2), load_avg),convert_to_fix(1)));
-			t->recent_cpu = add(mul(c,t->recent_cpu),convert_to_fix(t->nice));
-	}
-	
-	for(struct list_elem *sema_elem = list_begin(&t->lock_list); sema_elem != list_end(&t->lock_list); sema_elem = list_next(sema_elem)) {
-		struct semaphore *sema = list_entry(sema_elem, struct semaphore, elem);
-		for(struct list_elem *waiter_elem = list_begin(&sema->waiters); waiter_elem != list_end(&sema->waiters); waiter_elem = list_next(waiter_elem)) {
-			struct thread *waiter = list_entry(waiter_elem, struct thread, elem);
-			update_recent_cpu_blocked(waiter);
+		fixed_point_t c = div(mul( convert_to_fix(2),load_avg),add(mul(convert_to_fix(2), load_avg),convert_to_fix(1)));
+		t->recent_cpu = add(mul(c,t->recent_cpu),convert_to_fix(t->nice));
+		
+		for(struct list_elem *sema_elem = list_begin(&t->lock_list); sema_elem != list_end(&t->lock_list); sema_elem = list_next(sema_elem)) {
+			struct semaphore *sema = list_entry(sema_elem, struct semaphore, elem);
+			for(struct list_elem *waiter_elem = list_begin(&sema->waiters); waiter_elem != list_end(&sema->waiters); waiter_elem = list_next(waiter_elem)) {
+				struct thread *waiter = list_entry(waiter_elem, struct thread, elem);
+				update_recent_cpu_blocked(waiter);
+			}
 		}
 	}
 }
@@ -491,44 +510,19 @@ void update_recent_cpu_sleeping() {
 
 		fixed_point_t c = div(mul( convert_to_fix(2),load_avg),add(mul(convert_to_fix(2), load_avg),convert_to_fix(1)));
 		t->recent_cpu = add(mul(c,t->recent_cpu),convert_to_fix(t->nice));
+		update_recent_cpu_blocked(t);
 	}
 }
 
-// // recent_cpu update 해주는 함수, recent_cpu는 17.14 형식 정수입니다.
+// updates recent_cpu. recent_cpu is a 17.14 fixed-point number.
 void
-update_recent_cpu(){
-	for (struct  list_elem *e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) { //update running threads
+update_recent_cpu() {
+	for (struct  list_elem *e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e)) { //update ready threads.
 		struct thread *t = list_entry(e, struct thread, elem); 
-		/*
-		// c=  2 * load_avg / (2 * load_avg + 1)
-		if (t!= idle_thread) {
-			fixed_point_t c = div(mul( convert_to_fix(2),load_avg),add(mul(convert_to_fix(2), load_avg),convert_to_fix(1)));
-			t->recent_cpu = add(mul(c,t->recent_cpu),convert_to_fix(t->nice));
-		}
-		*/
 		update_recent_cpu_blocked(t);
 	}
 	update_recent_cpu_sleeping(); //update sleeping threads.
-	// block_list에 대해서 업데이트
-	// for (struct  list_elem *e = list_begin(&block_list); e != list_end(&block_list); e = list_next(e)) {
-	// 	struct thread *t = e;
-	// 	// c=  2 * load_avg / (2 * load_avg + 1)
-	// 	fixed_point_t c = div(mul( convert_to_fix(2),load_avg),add(mul(convert_to_fix(2), load_avg),convert_to_fix(1)));
-	// 	t->recent_cpu = add(mul(c,t->recent_cpu),convert_to_fix(t->nice));
-	// }
-	struct thread *t = thread_current();
-	update_recent_cpu_blocked(t); //update currently running thread
-	// c=  2 * load_avg / (2 * load_avg + 1)
-
-	// msg("load_avg 는 : %d, nice는 : %d", load_avg, convert_to_fix(t->nice));
-	// msg("계산 전 : %d", t->recent_cpu);
-	/*
-	fixed_point_t c = div(mul(convert_to_fix(2),load_avg),add(mul(convert_to_fix(2), load_avg),convert_to_fix(1)));
-	t->recent_cpu = add(mul(c,t->recent_cpu),convert_to_fix(t->nice));
-	*/
-	// msg("계산 후 : %d", t->recent_cpu);
-	
-
+	update_recent_cpu_blocked(thread_current()); //update currently running thread.
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -582,7 +576,6 @@ kernel_thread (thread_func *function, void *aux) {
 
 	intr_enable ();       /* The scheduler runs with interrupts off. */
 	function (aux);       /* Execute the thread function. */
-	//msg("thread_exit() by %d\n", thread_current()->priority);
 	thread_exit ();       /* If function() returns, kill the thread. */
 }
 
@@ -597,12 +590,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 
 	memset (t, 0, sizeof *t);
 	t->status = THREAD_BLOCKED; 
-	// list_push_back(&block_list, &t->elem);
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	list_init(&t->lock_list);
-	t->waiting_for = NULL;
 	t->magic = THREAD_MAGIC;
 
 }
@@ -619,7 +610,6 @@ next_thread_to_run (void) {
 	else {
 		struct thread *t = list_entry(list_max (&ready_list, compare_priority, NULL), struct thread, elem);
 		list_remove(&t->elem);
-		//struct thread *t = list_entry(list_pop_front(&ready_list), struct thread, elem);
 		return t;
 	}
 }
@@ -768,17 +758,6 @@ schedule (void) {
 			ASSERT (curr != next);
 			list_push_back (&destruction_req, &curr->elem);
 		}
-
-		// nested donation handling code
-		/*
-		struct thread *t = curr->waiting_for;
-		while(t != NULL) {
-			t->priority = curr->priority;
-			t = t->waiting_for;
-		}
-		*/
-
-		//printf("Hi: %d\n", next->priority);
 
 		/* Before switching the thread, we first save the information
 		 * of current running. */
