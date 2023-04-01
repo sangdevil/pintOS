@@ -41,6 +41,79 @@ syscall_init (void) {
 void
 syscall_handler (struct intr_frame *f UNUSED) {
 	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+	// printf ("system call!\n");
+
+	//printf ("system call number: %d\n", f->R.rax);
+	//printf ("rdi = %d, rsi = %p, rdx = %d\n", f->R.rdi, (void *)f->R.rsi, f->R.rdx);
+	//hex_dump(0, (void *)f->R.rsi, f->R.rdx, true);
+
+	switch(f->R.rax) { //system call number. Refer to lib/user/syscall.c for each system call functions.
+		
+		case SYS_HALT: {                  /* Halt the operating system. */
+			
+			break;
+		}
+		case SYS_EXIT: {                  /* Terminate this process. */
+			int status = f->R.rdi;
+			thread_exit();
+			break;
+		}
+		case SYS_FORK: {                  /* Clone current process. */
+			
+			break;
+		}
+		case SYS_EXEC: {                  /* Switch current process. */
+			
+			break;
+		}
+		case SYS_WAIT: {                  /* Wait for a child process to die. */
+			
+			break;
+		}
+		case SYS_CREATE: {                /* Create a file. */
+			
+			break;
+		}
+		case SYS_REMOVE: {                /* Delete a file. */
+			
+			break;
+		}
+		case SYS_OPEN: {                  /* Open a file. */
+			
+			break;
+		}
+		case SYS_FILESIZE: {              /* Obtain a file's size. */
+			
+			break;
+		}
+		case SYS_READ: {                  /* Read from a file. */
+			
+			break;
+		}
+		case SYS_WRITE: {                  /* Write to a file. */
+			int fd = f->R.rdi;
+			const void *buffer = f->R.rsi;
+			unsigned size = f->R.rdx;
+
+			// temporary code to handle printf, msg calls in user program.
+			putbuf(buffer, size); // defined in lib/kernel/console.c
+			f->R.rax = size;
+			break;
+		}
+		case SYS_SEEK: {                  /* Change position in a file. */
+			
+			break;
+		}
+		case SYS_TELL: {                  /* Report current position in a file. */
+			
+			break;
+		}
+		case SYS_CLOSE: {                 /* Close a file. */
+			
+			break;
+		}
+	}
+	
+
+	// thread_exit ();
 }

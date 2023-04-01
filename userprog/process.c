@@ -22,6 +22,9 @@
 #include "vm/vm.h"
 #endif
 
+#define MAX_ARGC 128
+//max. number of command line arguments
+
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
@@ -50,6 +53,8 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	char *saveptr;
+	file_name = strtok_r(file_name, " ", &saveptr); // truncates any arguments following actual file name.
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
@@ -178,6 +183,7 @@ process_exec (void *f_name) {
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
+	//printf("Load result = %d\n", success);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
@@ -204,6 +210,8 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	//while(1);
+	for(int x = 0; x <= 1000000000; x++); //waits for reasonable amount of time.
 	return -1;
 }
 
@@ -215,6 +223,7 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+	printf ("%s: exit(%d)\n", curr->name, curr->tf.R.rax);
 
 	process_cleanup ();
 }
@@ -335,6 +344,16 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	process_activate (thread_current ());
 
+	/* parse file_name before we open the file. */
+	char *token, *saveptr;
+	char **args = (char **)malloc(MAX_ARGC * sizeof(char *)); //array of arguments, used malloc to prevent possible stack overflow
+	i = 0;
+	for(token = strtok_r(file_name, " ", &saveptr); token != NULL; token = strtok_r(NULL, " ", &saveptr)) {
+		ASSERT(i < MAX_ARGC);
+		args[i++] = token; //store i-th argument
+	}
+	int argc = i;
+
 	/* Open executable file. */
 	file = filesys_open (file_name);
 	if (file == NULL) {
@@ -416,6 +435,36 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+
+	char **args_stack_addr = (char **)malloc(MAX_ARGC * sizeof(char *));
+	char *p = (char *)if_->rsp; // for writing characters on the stack.
+	// char *p = pml4e_walk(thread_current()->pml4, (uint8_t *)if_->rsp - PGSIZE, 0);
+	// ASSERT(p);
+	for(i = argc-1; i >= 0; i--) {
+		for(int j = strlen(args[i]); j >= 0; j--) {
+			*(--p) = args[i][j];
+		}
+		args_stack_addr[i] = p; // address of the i-th argument on stack.
+	}
+	while((uintptr_t)p % 8 != 0) *(--p) = 0; // word-align
+
+	char **q = (char **)p; // for writing addresses on the stack.
+
+	*(--q) = 0; // null pointer sentinel
+	for(i = argc-1; i >= 0; i--) {
+		*(--q) = args_stack_addr[i];
+	}
+	char **argv = q;
+	*(--q) = 0; //return address
+
+	if_->rsp = (uintptr_t) q;
+	if_->R.rdi = argc;
+	if_->R.rsi = (uint64_t) argv;
+
+	free(args);
+	free(args_stack_addr);
+
+	//hex_dump(0, (void *)if_->rsp, USER_STACK - if_->rsp, true);
 
 	success = true;
 

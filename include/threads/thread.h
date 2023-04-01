@@ -1,5 +1,6 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
+#define USERPROG
 
 #include <debug.h>
 #include <list.h>
@@ -29,11 +30,6 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
-
-// typedef struct {
-// 	int priority;
-// 	struct list_elem elem;
-// } pri_t;
 
 /* A kernel thread or user process.
  *
