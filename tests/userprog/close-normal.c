@@ -12,3 +12,7 @@ test_main (void)
   msg ("close \"sample.txt\"");
   close (handle);
 }
+/* This is just for fun.
+     
+   Written by Minkyu Jung, Jinyoung Oh <cs330_ta@casys.kaist.ac.kr>
+*/

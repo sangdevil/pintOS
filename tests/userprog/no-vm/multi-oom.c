@@ -5,13 +5,10 @@
    before it fails to start a new process.  We require that,
    if a process doesn't actually get to start, exec() must
    return -1, not a valid PID.
-
    We repeat this process 10 times, checking that your kernel
    allows for the same level of depth every time.
-
    In addition, some processes will spawn children that terminate
    abnormally after allocating some resources.
-
    We set EXPECTED_DEPTH_TO_PASS heuristically by
    giving *large* margin on the value from our implementation.
    If you seriously think there is no memory leak in your code

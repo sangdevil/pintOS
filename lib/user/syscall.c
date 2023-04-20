@@ -1,5 +1,6 @@
 #include <syscall.h>
 #include <stdint.h>
+#include <stdio.h>
 #include "../syscall-nr.h"
 
 __attribute__((always_inline))
@@ -138,6 +139,7 @@ tell (int fd) {
 void
 close (int fd) {
 	syscall1 (SYS_CLOSE, fd);
+	
 }
 
 int

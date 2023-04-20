@@ -10,9 +10,11 @@ void
 test_main (void) 
 {
   int handle;
-  CHECK ((handle = open ("sample.txt")) > 1, "open \"sample.txt\"");
+  close(0);
+  CHECK ((handle = open ("sample.txt")) > 0, "open \"sample.txt\"");
   msg ("close \"sample.txt\"");
   close (handle);
+
   msg ("close \"sample.txt\" again");
   close (handle);
 }

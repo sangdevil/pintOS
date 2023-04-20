@@ -29,9 +29,9 @@ main (int argc, const char *argv[])
 
   random_init (0);
   random_bytes (buf, sizeof buf);
-
+  msg("size : %d", sizeof buf);
   CHECK ((fd = open (file_name)) > 1, "open \"%s\"", file_name);
-  for (i = 0; i < sizeof buf; i++) 
+  for (i = 0; i < sizeof buf; i++)
     {
       char c;
       CHECK (read (fd, &c, 1) > 0, "read \"%s\"", file_name);

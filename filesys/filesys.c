@@ -91,7 +91,7 @@ filesys_open (const char *name) {
 
 /* Deletes the file named NAME.
  * Returns true if successful, false on failure.
- * Fails if no file named NAME exists,
+/root/pintos-kaist/userprog/build/tests/filesys * Fails if no file named NAME exists,
  * or if an internal memory allocation fails. */
 bool
 filesys_remove (const char *name) {

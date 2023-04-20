@@ -87,6 +87,10 @@ static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 // defined load_avg here
 static fixed_point_t load_avg = 0;
 
+// defined in process.c ..
+extern tid_t initd_tid;
+extern struct semaphore sema_main_initd;
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -213,9 +217,14 @@ thread_create (const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 
 	// set nice and recent cpu values
-
 	t->nice = 0;
 	t->recent_cpu = 0;
+
+	// set next_fd value (starts at 2)
+	t->next_fd = 0;
+
+	// print exit code defaults to false (if not created by create_initd or fork.)
+	t->print_exit_code = false;
 
 	/* Add to run queue. */
 	thread_unblock (t);
@@ -299,6 +308,7 @@ thread_exit (void) {
 	ASSERT (!intr_context ());
 
 #ifdef USERPROG
+
 	process_exit ();
 #endif
 
@@ -347,6 +357,7 @@ int _thread_get_priority(struct thread *t) {
 			struct semaphore *sema = list_entry(sema_elem, struct semaphore, elem);
 			for(struct list_elem *waiter_elem = list_begin(&sema->waiters); waiter_elem != list_end(&sema->waiters); waiter_elem = list_next(waiter_elem)) {
 				struct thread *waiter = list_entry(waiter_elem, struct thread, elem);
+				// msg("%d is waiting for %d.", waiter->tid, t->tid);
 				priority = max(priority, _thread_get_priority(waiter));
 			}
 		}
@@ -594,8 +605,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	list_init(&t->lock_list);
+	list_init(&t->fd_list);
+	list_init(&t->up_list);
+	list_init(&t->down_list);
 	t->magic = THREAD_MAGIC;
-
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -722,7 +735,13 @@ do_schedule(int status) {
 	while (!list_empty (&destruction_req)) {
 		struct thread *victim =
 			list_entry (list_pop_front (&destruction_req), struct thread, elem);
+		// tid_t tid = victim->tid;
 		palloc_free_page(victim);
+		/*
+		if(tid == initd_tid) {
+			sema_up(&sema_initd);
+		}
+		*/
 	}
 	thread_current ()->status = status;
 	schedule ();

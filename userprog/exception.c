@@ -69,6 +69,9 @@ exception_print_stats (void) {
 /* Handler for an exception (probably) caused by a user process. */
 static void
 kill (struct intr_frame *f) {
+
+
+	
 	/* This interrupt is one (probably) caused by a user process.
 	   For example, the process might have tried to access unmapped
 	   virtual memory (a page fault).  For now, we simply kill the
@@ -76,17 +79,17 @@ kill (struct intr_frame *f) {
 	   the kernel.  Real Unix-like operating systems pass most
 	   exceptions back to the process via signals, but we don't
 	   implement them. */
-
+	
 	/* The interrupt frame's code segment value tells us where the
 	   exception originated. */
 	switch (f->cs) {
 		case SEL_UCSEG:
 			/* User's code segment, so it's a user exception, as we
 			   expected.  Kill the user process.  */
-			printf ("%s: dying due to interrupt %#04llx (%s).\n",
-					thread_name (), f->vec_no, intr_name (f->vec_no));
-			intr_dump_frame (f);
-			thread_exit ();
+			// printf ("%s: dying due to interrupt %#04llx (%s).\n",
+			// 		thread_name (), f->vec_no, intr_name (f->vec_no));
+			// intr_dump_frame (f);
+			_thread_exit (-1);
 
 		case SEL_KCSEG:
 			/* Kernel's code segment, which indicates a kernel bug.
@@ -122,7 +125,6 @@ page_fault (struct intr_frame *f) {
 	bool write;        /* True: access was write, false: access was read. */
 	bool user;         /* True: access by user, false: access by kernel. */
 	void *fault_addr;  /* Fault address. */
-
 	/* Obtain faulting address, the virtual address that was
 	   accessed to cause the fault.  It may point to code or to
 	   data.  It is not necessarily the address of the instruction

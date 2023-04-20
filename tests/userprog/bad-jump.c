@@ -7,7 +7,9 @@
 void
 test_main (void) 
 {
+
   msg ("Congratulations - you have successfully called NULL: %d", 
         ((int (*)(void))NULL)());
   fail ("should have exited with -1");
+  
 }

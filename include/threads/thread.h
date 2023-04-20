@@ -1,7 +1,6 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 #define USERPROG
-
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -24,6 +23,7 @@ enum thread_status {
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
+typedef tid_t pid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
 
 /* Thread priorities. */
@@ -101,6 +101,14 @@ struct thread {
 	struct list lock_list; 				/* list of locks(semaphores) that this thread is holding */
 	fixed_point_t recent_cpu;           /* recent cpu value for this thread */
 	int nice;							/* nice value for this thread */
+  	struct list fd_list;   				/* List of open file descriptors. */
+  	uint32_t next_fd;               	/* The next available fd. */
+
+	int exit_code;						/* exit code of this thread */
+	bool fork_error;					/* did __do_fork() fail? */
+	struct list up_list;				/* parent */
+	struct list down_list;				/* list of childs (list of struct waiter) */
+	bool print_exit_code;				/* true for project 2, false for project 1 test cases */
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
