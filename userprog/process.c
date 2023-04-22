@@ -47,6 +47,8 @@ struct semaphore sema_main_initd;
 struct semaphore sema_create_initd;
 int initd_status;
 
+extern struct lock user_lock;
+
 /* General process initializer for initd and other process. */
 static bool
 process_init (void) {
@@ -296,18 +298,18 @@ __do_fork (void *aux) {
 	current->print_exit_code = true;
 
 	struct list *fd_list = &parent->fd_list;
+
+	lock_acquire(&user_lock);
 	for(struct list_elem *e = list_begin(fd_list); e != list_end(fd_list); e = list_next(e)) { 
 		struct file_descriptor *parent_fd = list_entry(e, struct file_descriptor, elem); 
 		struct file *file_copy = NULL;
 		if (parent_fd->file) {
 			if( !(file_copy = file_duplicate(parent_fd->file)) ) {
-				//msg("file copy error!");
 				goto error; 
 			} 
 		}
 		struct file_descriptor *curr_fd = (struct file_descriptor *)malloc(sizeof (struct file_descriptor));
 		if (!curr_fd) {
-			// msg("malloc error! - 2");
 			file_close(file_copy);
 			goto error;
 		}
@@ -328,16 +330,15 @@ __do_fork (void *aux) {
 		curr_fd->file = file_copy;
 		curr_fd->file_size = parent_fd->file_size;
 		list_push_back(&current->fd_list, &curr_fd->elem);
-		// msg("file fd %d is succesfully copied, file size : %d current thread next fd : %d", 
-		// 	curr_fd->fd, curr_fd->file_size, current->next_fd);
+
 		
 	}
+	lock_release(&user_lock);
 
 	/* for process_wait() */
 	struct waiter *w = (struct waiter *) args[3];
 	struct waiter *w_child = (struct waiter *) malloc(sizeof(struct waiter)); //__do_fork never fails from this point
 	if(!w_child) {
-		// msg("malloc error! - 1");
 		goto error;
 	}
 	memcpy(w_child, w, sizeof (struct waiter));
@@ -354,6 +355,9 @@ __do_fork (void *aux) {
 	}
 error:
 	//msg("__do_fork error!");
+	if(lock_held_by_current_thread(&user_lock)) {
+		lock_release(&user_lock);
+	}
 	parent->fork_error = true;
 	sema_up(sema_fork);
 	_thread_exit(-1);
@@ -476,6 +480,8 @@ process_exit (void) {
 	
 	struct list *fd_list = &curr->fd_list;
 	// msg("let's free %s's fd_list of size %d", curr->name, list_size(&curr->fd_list));
+
+	lock_acquire(&user_lock);
 	for(struct list_elem *e = list_begin(fd_list); e != list_end(fd_list);) {
 		struct file_descriptor *fd = list_entry(e, struct file_descriptor, elem);
 		for (struct list_elem *e1 = list_begin(&fd->int_list); e1 != list_end(&fd->int_list);){
@@ -484,91 +490,60 @@ process_exit (void) {
 			free(cur_n);
 		}		
 		file_close(fd->file);
-		// list_remove(&fd->elem);
 		e = list_remove(e);
-		// curr->next_fd--;
 		free(fd);
 	}
-	// msg("succesfully removed %s's file list", curr->name);
-	//msg("done!");
-	
-	//msg("Hi");
+	lock_release(&user_lock);
+
 
 	/* for process_wait() */
-	// msg("up start");/
 	struct list *up_list = &curr->up_list;
 	for(struct list_elem *e = list_begin(up_list); e != list_end(up_list);) { //there's only 1 parent for each thread, though.
 		struct waiter *w = list_entry(e, struct waiter, elem);
 		lock_acquire(w->lock);
 		if(*w->exited) { //if the parent has already exited, it's the current thread's responsibility to free.
 			struct semaphore *sema = list_entry(e, struct semaphore, elem);
-			// msg("does this fail..?");
 			lock_release(w->lock);
-			// msg("not this time..");
-			//msg("2");
 			free(w->sema_wait);
 			free(w->lock);
 			free(w->exited);
 			free(w->exit_code);
-			//msg("2");
-			// msg("1");
-			// free(w);
-			// msg("1");
 		}
 		else { //otherwise, let the parent free.
 			*w->exited = true;
 			*w->exit_code = curr->exit_code;
-			// msg("lock 11");
 			lock_release(w->lock);
-			// msg("lock 11 finish");
 			sema_up(w->sema_wait);
-			// msg("2");
-			// free(w);
-			// msg("2");
+
 		}
 		e = list_remove(e);
-		// msg("free? 1");
 		free(w);
-		// msg("free 1 finish");
 	}
-	// msg("up finish");
-	// msg("down start");
+
 	struct list *down_list = &curr->down_list;
 	for(struct list_elem *e = list_begin(down_list); e != list_end(down_list);) {
 		struct waiter *w = list_entry(e, struct waiter, elem);
 		lock_acquire(w->lock);
 		if(*w->exited) { //if the child has already exited, it's the current thread's responsibility to free.
-			// msg("does this fail..? 2");
 			lock_release(w->lock);
-			// msg(" yes it fail, 2");
-			//msg("3");
 			free(w->sema_wait);
 			free(w->lock);
 			free(w->exited);
 			free(w->exit_code);
-			//msg("3");
-			// msg("3");
-			// free(w);
-			// msg("3");
+
 		}
 		else { //otherwise, let the child free.
 			*w->exited = true;
 			*w->exit_code = curr->exit_code;
-			// msg("lock 22");
 			lock_release(w->lock);
-			// msg("lock 22 finish");
 			sema_up(w->sema_wait);
-			// msg("4");
-			// free(w);
-			// msg("4");
 		}
 		e = list_remove(e);
-		// msg("free? 2");
+
 		free(w);
-		// msg("free 2 finish");
+
 	}
 
-	// msg("down finish");
 	
 	if(curr->tid == initd_tid) { //this process was initd..
 		sema_up(&sema_main_initd); //let main wake up.. (?)
@@ -577,7 +552,6 @@ process_exit (void) {
 	
 
 	process_cleanup ();	
-	// msg("succefully exited %s", curr->name);
 }
 
 /* Free the current process's resources. */
@@ -658,6 +632,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 	int argc = i;
 
+	lock_acquire(&user_lock);
 	/* Open executable file. */
 	file = filesys_open (file_name);
 	if (file == NULL) {
@@ -778,6 +753,7 @@ done:
 	free(args);
 	free(args_stack_addr);
 	file_close (file);
+	lock_release(&user_lock);
 	return success;
 }
 
