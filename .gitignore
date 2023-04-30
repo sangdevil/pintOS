@@ -1,0 +1,8 @@
+*.errors
+*.result
+*.output
+*.d
+*.o
+threads/build/*
+userprog/build/*
+vm/build/*
