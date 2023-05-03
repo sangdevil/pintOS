@@ -47,7 +47,7 @@ struct semaphore sema_main_initd;
 struct semaphore sema_create_initd;
 int initd_status;
 
-extern struct lock user_lock;
+//extern struct lock user_lock;
 
 /* General process initializer for initd and other process. */
 static bool
@@ -299,7 +299,7 @@ __do_fork (void *aux) {
 
 	struct list *fd_list = &parent->fd_list;
 
-	lock_acquire(&user_lock);
+	user_lock_acquire();
 	for(struct list_elem *e = list_begin(fd_list); e != list_end(fd_list); e = list_next(e)) { 
 		struct file_descriptor *parent_fd = list_entry(e, struct file_descriptor, elem); 
 		struct file *file_copy = NULL;
@@ -333,7 +333,7 @@ __do_fork (void *aux) {
 
 		
 	}
-	lock_release(&user_lock);
+	user_lock_release();
 
 	/* for process_wait() */
 	struct waiter *w = (struct waiter *) args[3];
@@ -355,12 +355,10 @@ __do_fork (void *aux) {
 	}
 error:
 	//msg("__do_fork error!");
-	if(lock_held_by_current_thread(&user_lock)) {
-		lock_release(&user_lock);
-	}
+	user_lock_release();
 	parent->fork_error = true;
 	sema_up(sema_fork);
-	_thread_exit(-1);
+	thread_exit_with_status(-1);
 }
 
 /* Switch the current execution context to the f_name.
@@ -383,7 +381,7 @@ process_exec (void *f_name) {
 
 	/* And then load the binary */
 	success = load (file_name, &_if);
-	// printf("Load result = %d\n", success);
+	//printf("Load result = %d\n", success);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
@@ -458,7 +456,7 @@ process_wait (tid_t child_tid UNUSED) {
 
 //helper for thread_exit.
 void
-_thread_exit (int status) {
+thread_exit_with_status (int status) {
 	thread_current()->exit_code = status;
 	thread_exit();
 }
@@ -481,7 +479,7 @@ process_exit (void) {
 	struct list *fd_list = &curr->fd_list;
 	// msg("let's free %s's fd_list of size %d", curr->name, list_size(&curr->fd_list));
 
-	lock_acquire(&user_lock);
+	user_lock_acquire();
 	for(struct list_elem *e = list_begin(fd_list); e != list_end(fd_list);) {
 		struct file_descriptor *fd = list_entry(e, struct file_descriptor, elem);
 		for (struct list_elem *e1 = list_begin(&fd->int_list); e1 != list_end(&fd->int_list);){
@@ -493,7 +491,7 @@ process_exit (void) {
 		e = list_remove(e);
 		free(fd);
 	}
-	lock_release(&user_lock);
+	user_lock_release();
 
 
 	/* for process_wait() */
@@ -632,7 +630,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 	int argc = i;
 
-	lock_acquire(&user_lock);
+	user_lock_acquire();
 	/* Open executable file. */
 	file = filesys_open (file_name);
 	if (file == NULL) {
@@ -697,8 +695,10 @@ load (const char *file_name, struct intr_frame *if_) {
 						zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
 					}
 					if (!load_segment (file, file_page, (void *) mem_page,
-								read_bytes, zero_bytes, writable))
+								read_bytes, zero_bytes, writable)) {
+						//msg("load_segment error!");
 						goto done;
+					}
 				}
 				else
 					goto done;
@@ -744,7 +744,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	if_->R.rdi = argc;
 	if_->R.rsi = (uint64_t) argv;
 
-	//hex_dump(0, (void *)if_->rsp, USER_STACK - if_->rsp, true);
+	// hex_dump(0, (void *)if_->rsp, USER_STACK - if_->rsp, true);
 
 	success = true;
 
@@ -753,7 +753,7 @@ done:
 	free(args);
 	free(args_stack_addr);
 	file_close (file);
-	lock_release(&user_lock);
+	user_lock_release();
 	return success;
 }
 
@@ -911,6 +911,41 @@ lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+
+	struct args *args = (struct args *)aux;
+	struct file *file = args->file;
+	off_t ofs = args->ofs;
+	uint8_t *upage = args->upage;
+	size_t page_read_bytes = args->page_read_bytes;
+	size_t page_zero_bytes = args->page_zero_bytes;
+	bool writable = args->writable;
+	free(args);
+
+	// Copied from #ifndef VM load_segment
+
+	/* Get a page of memory. */
+	struct frame *frame = page->frame;
+	void *kpage = frame->kva;
+
+	//msg("%p -> %p", page->va, frame->kva);
+	user_lock_acquire();
+	file_seek(file, ofs);
+	/* Load this page. */
+	off_t bytes = file_read (file, kpage, page_read_bytes);
+	file_close(file);
+	user_lock_release();
+	if (bytes != (int) page_read_bytes) {
+		msg("Hi");
+		return false;
+	}
+	memset (kpage + page_read_bytes, 0, page_zero_bytes);
+	/* Add the page to the process's address space. */
+	uint64_t *pml4 = thread_current()->pml4;
+	if (!pml4_set_page(pml4, upage, kpage, writable)) { // ?
+		return false;
+	}
+	
+	return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -942,7 +977,17 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
+		struct args *args = (struct args *)malloc(sizeof (struct args));
+		struct file *file_copy = file_duplicate(file); //user lock already held in load()
+		*args = (struct args) {
+			.file = file_copy, 
+			.ofs = ofs, 
+			.upage = upage, 
+			.page_read_bytes = page_read_bytes, 
+			.page_zero_bytes = page_zero_bytes, 
+			.writable = writable
+		}; // ?
+		void *aux = (void *)args;
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
 					writable, lazy_load_segment, aux))
 			return false;
@@ -951,6 +996,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += PGSIZE; // ?
 	}
 	return true;
 }
@@ -965,6 +1011,11 @@ setup_stack (struct intr_frame *if_) {
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
+	vm_alloc_page(VM_ANON, stack_bottom, true);
+
+	if(success = vm_claim_page(stack_bottom)) {
+		if_->rsp = USER_STACK;
+	}
 
 	return success;
 }

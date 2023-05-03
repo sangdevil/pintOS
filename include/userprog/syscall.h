@@ -14,13 +14,14 @@ struct my_int {
 	struct list_elem elem;
 };
 
+struct lock user_lock;
+void user_lock_acquire(void);
+void user_lock_release(void);
 
 int process_file_descriptor(struct file *fp);
 
 void syscall_init (void);
 struct file_descriptor *find_file_descriptor_by_fd(int fd);
-bool valid_address(const void *name);
-void *translate_address(void *vaddr, bool write);
 bool remove_file_by_fd(int fd);
 
 #endif /* userprog/syscall.h */

@@ -6,14 +6,10 @@
 #include "threads/loader.h"
 #include "userprog/gdt.h"
 #include "threads/flags.h"
-// #include "threads/init.h"
 #include "intrinsic.h"
 #include "userprog/process.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
-// #include "filesys/inode.h"
-// #include "filesys/directory.h"
-// #include "filesys/off_t.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
 #include "threads/palloc.h"
@@ -34,7 +30,18 @@ void syscall_handler (struct intr_frame *);
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
-struct lock user_lock;
+//struct lock user_lock;
+void user_lock_acquire() {
+	if(!lock_held_by_current_thread(&user_lock)) {
+		lock_acquire(&user_lock);
+	}
+}
+void user_lock_release() {
+	if(lock_held_by_current_thread(&user_lock)) {
+		lock_release(&user_lock);
+	}
+}
+
 /* 현재 파일 fp를 열어주고 적절한 file_descripter를 생성하는 함수 */
 int process_file_descriptor(struct file *fp) {
 	struct thread *cur = thread_current();
@@ -123,21 +130,21 @@ struct file_descriptor *find_file_descriptor_by_fd(int fd) {
 
 // modified from pml4_get_page.
 // write = true for read(), when we write to buffer.
-void *translate_address(void *vaddr, bool write) { 
+bool validate_address(struct intr_frame *f, void *vaddr, bool write) { 
 	if(!is_user_vaddr(vaddr)) {
-		return NULL;
+		return false;
 	}
 
 	uint64_t *pml4 = thread_current()->pml4;
 	uint64_t *pte = pml4e_walk (pml4, (uint64_t) vaddr, 0);
-	
-	if (pte && (*pte & PTE_P)  && is_user_pte(pte) && (!write || is_writable(pte))) {
-		return ptov (PTE_ADDR (*pte)) + pg_ofs (vaddr);
+
+	if (pte && (*pte & PTE_P)  &&  (!write || is_writable(pte)) && is_user_pte(pte)) {
+		return true;
 	}
-
-	return NULL;
+	else {
+		return vm_try_handle_fault(f, vaddr, true, write, pte ? (*pte & PTE_P) : false);
+	}
 }
-
 
 void
 syscall_init (void) {
@@ -155,10 +162,8 @@ syscall_init (void) {
 }
 
 /* The main system call interface */
-/* 결국에 이놈은 f->R에 레지스터들을 적절하게 잘 넣어서 각 syscall에 해당하는 일들을 적절히 해준 뒤,
-f->R.rax에 다시 넣어주는 것임. */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
+syscall_handler (struct intr_frame *f) {
 	// TODO: Your implementation goes here.
 
 	switch(f->R.rax) { //system call number. Refer to lib/user/syscall.c for each system call functions.
@@ -169,13 +174,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		}
 		case SYS_EXIT: {                  /* Terminate this process. */
 			int status = f->R.rdi;
-			_thread_exit(status);
-			// struct thread *cur = thread_current();
-			// cur->exit_code = status;
-			// thread_exit();
+			thread_exit_with_status(status);
 			break;
 		}
 		case SYS_FORK: {                  /* Clone current process. */
+			//msg("fork");
 			const char *thread_name = (const char *) f->R.rdi;
 
 			tid_t tid = process_fork(thread_name, f);
@@ -186,13 +189,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		}
 		case SYS_EXEC: {                  /* Switch current process. */
 			const char *cmd_line = (const char *)f->R.rdi;
-			cmd_line = translate_address((void *)cmd_line, 0);
-			if(!cmd_line) {
-				_thread_exit(-1);
+			if(!validate_address(f, cmd_line, false)) {
+				thread_exit_with_status(-1);
 			}
 			char *fn_copy = palloc_get_page(0); //we need this because process_exec calls palloc_free_page on f_name.
 			if (!fn_copy) {
-				_thread_exit(-1); //terminate when fail.
+				thread_exit_with_status(-1); //terminate when fail.
 			}
 			strlcpy(fn_copy, cmd_line, PGSIZE); //page fault occurs here, probably because kernel can't translate user virtual address?
 
@@ -210,7 +212,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			// 	if (cur_fd->file)
 			// 		file_allow_write(cur_fd->file);
 			// }
-			_thread_exit(fail);
+			thread_exit_with_status(fail);
 			break;
 		}
 		case SYS_WAIT: {                  /* Wait for a child process to die. */
@@ -224,14 +226,14 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			bool success = false;
 			// 먼저, 이 이름이 valid한지 확인 후, name이 가지고 있는 주소가 유효한 주소인지를 확인한다. 
 			// 유효한 주소가 아니라면, exit 해야 함.
-			lock_acquire(&user_lock);
-			if (name && (name = translate_address((void *)name, false))) {
+			user_lock_acquire();
+			if (validate_address(f, name, false)) {
 				success = filesys_create(name, f->R.rsi);  /*성공하면 1 아니면 0 */
-				lock_release(&user_lock);
+				user_lock_release();
 			} else {
 				f->R.rax = -1;
-				lock_release(&user_lock);
-				_thread_exit(-1);
+				user_lock_release();
+				thread_exit_with_status(-1);
 			}
 			f->R.rax = success;
 			break;
@@ -239,13 +241,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_REMOVE: {                /* Delete a file. */
 			const char *name = (const char *) f->R.rdi;
 			// 먼저, 이 이름이 valid한지 확인 후,
-			lock_acquire(&user_lock);
-			if ( name = translate_address((void *)name, 0) ) {
+			user_lock_acquire();
+			if (validate_address(f, name, false)) {
 				bool success = filesys_remove(name);
 				f->R.rax = success;
-				
-			} 
-			lock_release(&user_lock);
+			}
+			user_lock_release();
 			break;
 		}
 		case SYS_OPEN: {                  /* Open a file. */
@@ -253,12 +254,12 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			struct file *fp = NULL;
 			// 먼저, 이 이름이 valid한지 확인 후, name이 가지고 있는 주소가 유효한 주소인지를 확인한다. 
 			// 유효한 주소가 아니라면, exit 해야 함.
-			lock_acquire(&user_lock);
-			if (name && (name = translate_address((void *) name, false))) {
+			user_lock_acquire();
+			if (validate_address(f, name, false)) {
 				fp = filesys_open(name);
 				if(!fp) {
 					f->R.rax = -1;
-					lock_release(&user_lock);
+					user_lock_release();
 					return;
 				}
 				
@@ -280,14 +281,14 @@ syscall_handler (struct intr_frame *f UNUSED) {
 				}
 			} 	else {
 				//f->R.rax = -1;	
-				lock_release(&user_lock);
-				_thread_exit(-1);
+				user_lock_release();
+				thread_exit_with_status(-1);
 				return;
 			}
 			// valid한 경우에만 파일을 연다. 
 			int file_descripter = process_file_descriptor(fp);
 			f->R.rax = file_descripter;
-			lock_release(&user_lock);
+			user_lock_release();
 
 			break;
 		}
@@ -319,45 +320,48 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			// printf("\n");
 
 			// 디버깅 마무리
-			lock_acquire(&user_lock);
+			user_lock_acquire();
 			fd = find_file_descriptor_by_fd((int) f->R.rdi);
 			if (fd) {
-				void *buff = translate_address((void *)f->R.rsi, true);
+				//void *buff = validate_address((void *)f->R.rsi, true);
+				void *buff = (void *)f->R.rsi;
 				unsigned size = f->R.rdx;
-				if (buff) {
+				//if (buff) {
+				if(validate_address(f, buff, true)) {
 					if (fd->file) {
 						
 						f->R.rax = file_read(fd->file, buff, size);
 						
 					}
-					lock_release(&user_lock);
+					user_lock_release();
 					return;
 				} else {
 					f->R.rax = -1;
-					lock_release(&user_lock);
-					_thread_exit(-1);
+					user_lock_release();
+					//msg("read error 1");
+					thread_exit_with_status(-1);
 					return;
 				}
 			}
 
 			f->R.rax = -1;					/* 여기는 아마 실행되면 안 될 듯*/
-			lock_release(&user_lock);
-			_thread_exit(-1);
+			user_lock_release();
+			thread_exit_with_status(-1);
 			break;
 		}
 		case SYS_WRITE: {                  /* Write to a file. */
 			int fd = f->R.rdi;
 			const void *buffer = (const void *) f->R.rsi;
 			unsigned size = (unsigned) f->R.rdx;
-			lock_acquire(&user_lock);
-			if (translate_address((void *) buffer, true) == NULL) {
-				lock_release(&user_lock);
-				_thread_exit(-1);	
+			user_lock_acquire();
+			if (!validate_address(f, buffer, true)) {
+				user_lock_release();
+				thread_exit_with_status(-1);	
 				return;
 			}
 			struct file_descriptor *fp = find_file_descriptor_by_fd(fd);
 			if (fp == NULL) {
-				lock_release(&user_lock);
+				user_lock_release();
 				f->R.rax = 0;
 				return;
 			} else {
@@ -372,7 +376,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 						
 					}
 				}
-				lock_release(&user_lock);
+				user_lock_release();
 			}
 			break;
 		}
@@ -402,9 +406,9 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		}
 		case SYS_CLOSE: {                 /* Close a file. */
 			int fd = (int) f->R.rdi;
-			lock_acquire(&user_lock);
+			user_lock_acquire();
 			bool suc = remove_file_by_fd(fd);
-			lock_release(&user_lock);
+			user_lock_release();
 			break;
 		}
 		case SYS_DUP2: {
@@ -432,7 +436,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			struct my_int *fds = (struct my_int *) malloc (sizeof (struct my_int));
 			if (!fds) {
 				f->R.rax = -1;
-				_thread_exit(-1);
+				thread_exit_with_status(-1);
 			}
 			fds->n = fd2;
 			list_push_back(&file_descriptor1->int_list, &fds->elem);

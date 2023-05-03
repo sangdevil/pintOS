@@ -34,7 +34,7 @@ test_main (void)
       msg ("Parent success");
     }
   
-    // close(handle);
+    close(handle);
   } else {
     msg ("child run");
 
@@ -52,6 +52,6 @@ test_main (void)
     memcpy(buffer, magic_sentence, 17);
 
     msg ("Child: %s", buffer);
-    // close(handle);
+    close(handle);
   }
 }

@@ -52,6 +52,15 @@ struct ELF64_PHDR {
 	uint64_t p_align;
 };
 
+struct args {
+	struct file *file;
+	off_t ofs;
+	uint8_t *upage;
+	size_t page_read_bytes;
+	size_t page_zero_bytes;
+	bool writable;
+};
+
 /* Abbreviations */
 #define ELF ELF64_hdr
 #define Phdr ELF64_PHDR
@@ -62,5 +71,6 @@ int process_exec (void *f_name);
 int process_wait (tid_t);
 void process_exit (void);
 void process_activate (struct thread *next);
+void thread_exit_with_status(int status);
 
 #endif /* userprog/process.h */

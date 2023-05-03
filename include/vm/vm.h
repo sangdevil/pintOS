@@ -48,6 +48,8 @@ struct page {
 
 	/* Your implementation */
 	struct hash_elem elem; /* for hash */
+	bool writable; 			/* Is this page writable? */
+	
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
 	union {
@@ -64,6 +66,7 @@ struct page {
 struct frame {
 	void *kva;
 	struct page *page;
+	struct list_elem elem;
 };
 
 /* The function table for page operations.
@@ -87,7 +90,6 @@ struct page_operations {
  * All designs up to you for this. */
 struct supplemental_page_table {
 	struct hash pages;
-
 };
 
 #include "threads/thread.h"
