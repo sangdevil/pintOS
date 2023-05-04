@@ -1,4 +1,5 @@
 /* vm.c: Generic interface for virtual memory objects. */
+#define MAX_STACK_SIZE (1<<20)
 
 #include "threads/malloc.h"
 #include "threads/mmu.h"
@@ -81,6 +82,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 				goto err;
 				break;
 		}
+
 		page->writable = writable;
 
 		/* TODO: Insert the page into the spt. */
@@ -159,19 +161,20 @@ vm_get_frame (void) {
 	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
 	void *kva = palloc_get_page(PAL_USER);
-	if (!kva){
-		frame = vm_evict_frame();
+	if (!kva) {
 		PANIC("TODO");
+		frame = vm_evict_frame();
+	}
+	else {
+		frame = (struct frame *) malloc(sizeof(struct frame));
+		if (!frame){
+			// this should not happen.
+			return NULL;
+		}
+		frame->kva = kva;
+		frame->page = NULL;
 	}
 
-	frame = (struct frame *) malloc(sizeof(struct frame));
-	if (!frame){
-		// this should not happen.
-		return NULL;
-	}
-
-	frame->kva = kva;
-	frame->page = NULL;
 	list_push_back(&frame_table, &frame->elem);
 	
 	ASSERT (frame != NULL);
@@ -181,7 +184,20 @@ vm_get_frame (void) {
 
 /* Growing the stack. */
 static void
-vm_stack_growth (void *addr UNUSED) {
+vm_stack_growth (void *addr) {
+	addr = pg_round_down(addr);
+	struct supplemental_page_table *spt = &thread_current()->spt;
+	struct page *page = NULL;
+	do {
+		//msg("%p", addr);
+		ASSERT((uintptr_t)addr >= USER_STACK - MAX_STACK_SIZE);
+		vm_alloc_page(VM_ANON, addr, true);
+		if(!vm_claim_page(addr)) {
+			PANIC("vm_stack_growth error!"); //?
+		}
+		addr = (void *) ((uintptr_t)addr + PGSIZE);
+		page = spt_find_page(spt, addr);
+	} while(page == NULL);
 }
 
 
@@ -192,7 +208,7 @@ vm_handle_wp (struct page *page UNUSED) {
 
 /* Return true on success */
 bool
-vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
+vm_try_handle_fault (struct intr_frame *f, void *addr,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
 	struct supplemental_page_table *spt = &thread_current ()->spt;
 	struct page *page = NULL;
@@ -201,8 +217,17 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	if(!is_user_vaddr(addr)) {
 		return false;
 	}
+retry:
 	page = spt_find_page(spt, addr);
 	if(page == NULL) {
+		uintptr_t rsp = f->rsp;
+		//msg("%p was %d, %d, %d", addr, user, write, not_present);
+		//msg("rsp = %p", rsp);
+		if(rsp-8 <= (uintptr_t)addr && (uintptr_t)addr < USER_STACK) { //stack growth. rsp-8 for push instruction.
+			vm_stack_growth(addr);
+			goto retry;
+		}
+
 		return false; // user tried to access unallocated page.
 	}
 
@@ -323,10 +348,3 @@ page_less(const struct hash_elem *e1, const struct hash_elem *e2, void *aux UNUS
 	struct page *p2 = hash_entry(e2, struct page, elem);
 	return p1->va < p2->va;
 }
-
-
-// 왜 spt_find_page, vm_claim_page, vm_do_claim_page 세가지 함수를 만들었을까? 
-// 결국 세 개를 하나로 합쳐도 될 것 같은데... 일단 구현하라는데 하긴 했는데, 3개가 거의 이어짐.
-// spt_find_page는 주어진 va로부터 page를 return, vm_claim_page는 vm_do_claim 호출,
-// vm_do_claim_page는 주어진 페이지가 이미 프레임과 연결이 됐는지를 확인.
-// 그리고 swap in을 통해 물리 메모리에 올림. 근데 swap in은 어디에 ?
