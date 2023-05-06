@@ -130,6 +130,7 @@ static void
 initd (void *f_name) {
 #ifdef VM
 	supplemental_page_table_init (&thread_current ()->spt);
+	
 #endif
 
 	process_init ();
@@ -928,22 +929,29 @@ lazy_load_segment (struct page *page, void *aux) {
 	void *kpage = frame->kva;
 
 	//msg("%p -> %p", page->va, frame->kva);
-	user_lock_acquire();
+	bool user_lock_held;
+	if(!(user_lock_held = lock_held_by_current_thread(&user_lock))) {
+		user_lock_acquire();
+	}
 	file_seek(file, ofs);
 	/* Load this page. */
 	off_t bytes = file_read (file, kpage, page_read_bytes);
 	file_close(file);
-	user_lock_release();
+	if(!user_lock_held) {
+		user_lock_release();
+	}
 	if (bytes != (int) page_read_bytes) {
 		msg("Hi");
 		return false;
 	}
 	memset (kpage + page_read_bytes, 0, page_zero_bytes);
 	/* Add the page to the process's address space. */
+	/*
 	uint64_t *pml4 = thread_current()->pml4;
 	if (!pml4_set_page(pml4, upage, kpage, writable)) { // ?
 		return false;
 	}
+	*/
 	
 	return true;
 }

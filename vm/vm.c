@@ -139,6 +139,11 @@ static struct frame *
 vm_get_victim (void) {
 	struct frame *victim = NULL;
 	 /* TODO: The policy for eviction is up to you. */
+	//naive FIFO implementation
+	struct list_elem *e = list_pop_front(&frame_table);
+	victim = list_entry(e, struct frame, elem);
+	list_push_back(&frame_table, e);
+
 	return victim;
 }
 
@@ -146,10 +151,14 @@ vm_get_victim (void) {
  * Return NULL on error.*/
 static struct frame *
 vm_evict_frame (void) {
-	struct frame *victim UNUSED = vm_get_victim ();
+	struct frame *victim = vm_get_victim ();
 	/* TODO: swap out the victim and return the evicted frame. */
-
-	return NULL;
+	struct page *page = victim->page;
+	//msg("evicted: %p -> %p", page->va, victim->kva);
+	if(!swap_out(page)) {
+		return NULL;
+	}
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -162,21 +171,24 @@ vm_get_frame (void) {
 	/* TODO: Fill this function. */
 	void *kva = palloc_get_page(PAL_USER);
 	if (!kva) {
-		PANIC("TODO");
+		//PANIC("TODO");
+		//msg("palloc failed.");
 		frame = vm_evict_frame();
 	}
 	else {
+		//msg("palloc successful.");
 		frame = (struct frame *) malloc(sizeof(struct frame));
 		if (!frame){
 			// this should not happen.
-			return NULL;
+			// return NULL;
+			PANIC("vm_get_frame error!");
 		}
 		frame->kva = kva;
 		frame->page = NULL;
+		
+		list_push_back(&frame_table, &frame->elem);
 	}
 
-	list_push_back(&frame_table, &frame->elem);
-	
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
 	return frame;
@@ -209,20 +221,19 @@ vm_handle_wp (struct page *page UNUSED) {
 /* Return true on success */
 bool
 vm_try_handle_fault (struct intr_frame *f, void *addr,
-		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
+		bool user UNUSED, bool write, bool not_present) {
 	struct supplemental_page_table *spt = &thread_current ()->spt;
 	struct page *page = NULL;
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	if(!is_user_vaddr(addr)) {
+	if(!is_user_vaddr(addr) || (write && !not_present)) { //writing r/o page.
 		return false;
 	}
+	//msg("faulting address: %p, user = %d, write = %d, not_present = %d", addr, user, write, not_present);
 retry:
 	page = spt_find_page(spt, addr);
 	if(page == NULL) {
 		uintptr_t rsp = f->rsp;
-		//msg("%p was %d, %d, %d", addr, user, write, not_present);
-		//msg("rsp = %p", rsp);
 		if(rsp-8 <= (uintptr_t)addr && (uintptr_t)addr < USER_STACK) { //stack growth. rsp-8 for push instruction.
 			vm_stack_growth(addr);
 			goto retry;
@@ -230,7 +241,6 @@ retry:
 
 		return false; // user tried to access unallocated page.
 	}
-
 	return vm_do_claim_page (page);
 }
 
@@ -261,14 +271,14 @@ vm_do_claim_page (struct page *page) {
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
-	// msg("%p -> %p", page->va, frame->kva);
+	//msg("%p -> %p", page->va, frame->kva);
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-	uint64_t *pml4 = thread_current()->pml4;
+	uint64_t *pml4 = thread_current()->pml4; // ?
 	if (!pml4_set_page(pml4, page->va, frame->kva, page->writable)){ // ?
-		//msg("vm_do_clam_page returns false.");
 		return false;
 	}
+	//msg("name = %s, %p -> %p, %d", thread_current()->name, page->va, frame->kva, VM_TYPE(page->operations->type));
 	return swap_in (page, frame->kva);
 }
 
@@ -347,4 +357,14 @@ page_less(const struct hash_elem *e1, const struct hash_elem *e2, void *aux UNUS
 	struct page *p1 = hash_entry(e1, struct page, elem);
 	struct page *p2 = hash_entry(e2, struct page, elem);
 	return p1->va < p2->va;
+}
+
+struct frame *ft_find_frame(void *kva) {
+	for(struct list_elem *e = list_begin(&frame_table); e != list_end(&frame_table); e = list_next(e)) {
+		struct frame *frame = list_entry(e, struct frame, elem);
+		if(frame->kva == kva) {
+			return frame;
+		}
+	}
+	return NULL;
 }

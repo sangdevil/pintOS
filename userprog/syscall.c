@@ -31,15 +31,18 @@ void syscall_handler (struct intr_frame *);
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
 //struct lock user_lock;
-void user_lock_acquire() {
-	if(!lock_held_by_current_thread(&user_lock)) {
+inline void user_lock_acquire() {
+	//if(!lock_held_by_current_thread(&user_lock)) {
+		//msg("%p wants user lock, held by %p", thread_current(), user_lock.holder);
 		lock_acquire(&user_lock);
-	}
+		//msg("%p acquired user lock", thread_current());
+	//}
 }
-void user_lock_release() {
-	if(lock_held_by_current_thread(&user_lock)) {
+inline void user_lock_release() {
+	//if(lock_held_by_current_thread(&user_lock)) {
+		//msg("%p released user lock", thread_current());
 		lock_release(&user_lock);
-	}
+	//}
 }
 
 /* 현재 파일 fp를 열어주고 적절한 file_descripter를 생성하는 함수 */
@@ -55,7 +58,9 @@ int process_file_descriptor(struct file *fp) {
 		list_init(&fd->int_list);
 		fds->n = cur->next_fd++;
 		fd->file = fp;
+		user_lock_acquire();
 		fd->file_size = file_length(fp);
+		user_lock_release();
 		list_push_back(&fd->int_list, &fds->elem);
 		list_push_back(&cur->fd_list, &fd->elem);
 		//msg("%d", fd->fd);
@@ -94,7 +99,9 @@ bool remove_file_by_fd(int fd) {
 		// printf("현재, fd : %d, file : %lld, ref_num : %d\n", cur_fd->fd, cur_fd->file, *cur_fd->ref_num);
 		if (found){
 			if (remove_cur) {
+				user_lock_acquire();
 				file_close(cur_fd->file);
+				user_lock_release();
 				e = list_remove(e);
 				free(cur_fd);
 			} 
@@ -126,7 +133,9 @@ struct file_descriptor *find_file_descriptor_by_fd(int fd) {
 	return NULL;
 }
 
-
+bool page_aligned(void *addr) {
+    return ((uint64_t) addr & (PGSIZE - 1)) == 0;
+}
 
 // modified from pml4_get_page.
 // write = true for read(), when we write to buffer.
@@ -137,12 +146,14 @@ bool validate_address(struct intr_frame *f, void *vaddr, bool write) {
 
 	uint64_t *pml4 = thread_current()->pml4;
 	uint64_t *pte = pml4e_walk (pml4, (uint64_t) vaddr, 0);
+	//msg("%d", *pte & PTE_P);
+	bool present = (pte && (*pte & PTE_P));
 
-	if (pte && (*pte & PTE_P)  &&  (!write || is_writable(pte)) && is_user_pte(pte)) {
+	if (present && (!write || is_writable(pte)) && is_user_pte(pte)) { //no permission issue
 		return true;
 	}
 	else {
-		return vm_try_handle_fault(f, vaddr, true, write, pte ? (*pte & PTE_P) : false);
+		return vm_try_handle_fault(f, vaddr, true, write, !present);
 	}
 }
 
@@ -226,13 +237,14 @@ syscall_handler (struct intr_frame *f) {
 			bool success = false;
 			// 먼저, 이 이름이 valid한지 확인 후, name이 가지고 있는 주소가 유효한 주소인지를 확인한다. 
 			// 유효한 주소가 아니라면, exit 해야 함.
-			user_lock_acquire();
 			if (validate_address(f, name, false)) {
+				//msg("create: validate success");
+				user_lock_acquire();
+				//msg("create: user lock acquire ");
 				success = filesys_create(name, f->R.rsi);  /*성공하면 1 아니면 0 */
 				user_lock_release();
 			} else {
 				f->R.rax = -1;
-				user_lock_release();
 				thread_exit_with_status(-1);
 			}
 			f->R.rax = success;
@@ -241,12 +253,12 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_REMOVE: {                /* Delete a file. */
 			const char *name = (const char *) f->R.rdi;
 			// 먼저, 이 이름이 valid한지 확인 후,
-			user_lock_acquire();
 			if (validate_address(f, name, false)) {
+				user_lock_acquire();
 				bool success = filesys_remove(name);
+				user_lock_release();
 				f->R.rax = success;
 			}
-			user_lock_release();
 			break;
 		}
 		case SYS_OPEN: {                  /* Open a file. */
@@ -254,17 +266,18 @@ syscall_handler (struct intr_frame *f) {
 			struct file *fp = NULL;
 			// 먼저, 이 이름이 valid한지 확인 후, name이 가지고 있는 주소가 유효한 주소인지를 확인한다. 
 			// 유효한 주소가 아니라면, exit 해야 함.
-			user_lock_acquire();
 			if (validate_address(f, name, false)) {
+				user_lock_acquire();
 				fp = filesys_open(name);
+				user_lock_release();
 				if(!fp) {
 					f->R.rax = -1;
-					user_lock_release();
 					return;
 				}
-				
 				struct ELF64_hdr ehdr;
+				user_lock_acquire();
 				off_t x = file_read_at (fp, &ehdr, sizeof ehdr, 0);
+				user_lock_release();
 				if (x != sizeof ehdr 
 				|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
 				|| ehdr.e_type != 2
@@ -276,20 +289,19 @@ syscall_handler (struct intr_frame *f) {
 				}
 				else {
 					if(strcmp( thread_current()->name, name ) == 0 ) {
+						user_lock_acquire();
 						file_deny_write(fp);
+						user_lock_release();
 					}
 				}
 			} 	else {
 				//f->R.rax = -1;	
-				user_lock_release();
 				thread_exit_with_status(-1);
 				return;
 			}
 			// valid한 경우에만 파일을 연다. 
 			int file_descripter = process_file_descriptor(fp);
 			f->R.rax = file_descripter;
-			user_lock_release();
-
 			break;
 		}
 		case SYS_FILESIZE: {              /* Obtain a file's size. */
@@ -320,7 +332,6 @@ syscall_handler (struct intr_frame *f) {
 			// printf("\n");
 
 			// 디버깅 마무리
-			user_lock_acquire();
 			fd = find_file_descriptor_by_fd((int) f->R.rdi);
 			if (fd) {
 				//void *buff = validate_address((void *)f->R.rsi, true);
@@ -329,15 +340,13 @@ syscall_handler (struct intr_frame *f) {
 				//if (buff) {
 				if(validate_address(f, buff, true)) {
 					if (fd->file) {
-						
+						user_lock_acquire();
 						f->R.rax = file_read(fd->file, buff, size);
-						
+						user_lock_release();
 					}
-					user_lock_release();
 					return;
 				} else {
 					f->R.rax = -1;
-					user_lock_release();
 					//msg("read error 1");
 					thread_exit_with_status(-1);
 					return;
@@ -345,7 +354,6 @@ syscall_handler (struct intr_frame *f) {
 			}
 
 			f->R.rax = -1;					/* 여기는 아마 실행되면 안 될 듯*/
-			user_lock_release();
 			thread_exit_with_status(-1);
 			break;
 		}
@@ -353,15 +361,12 @@ syscall_handler (struct intr_frame *f) {
 			int fd = f->R.rdi;
 			const void *buffer = (const void *) f->R.rsi;
 			unsigned size = (unsigned) f->R.rdx;
-			user_lock_acquire();
 			if (!validate_address(f, buffer, true)) {
-				user_lock_release();
 				thread_exit_with_status(-1);	
 				return;
 			}
 			struct file_descriptor *fp = find_file_descriptor_by_fd(fd);
 			if (fp == NULL) {
-				user_lock_release();
 				f->R.rax = 0;
 				return;
 			} else {
@@ -372,11 +377,11 @@ syscall_handler (struct intr_frame *f) {
 					f->R.rax = size;
 				} else {
 					if (fp->file) {
+						user_lock_acquire();
 						f->R.rax = file_write(fp->file, buffer, size);
-						
+						user_lock_release();
 					}
 				}
-				user_lock_release();
 			}
 			break;
 		}
@@ -389,7 +394,9 @@ syscall_handler (struct intr_frame *f) {
 				break;
 			}
 			if (fp->file)
+				user_lock_acquire();
 				file_seek(fp->file, position);
+				user_lock_release();
 			break;
 		}
 		case SYS_TELL: {                  /* Report current position in a file. */
@@ -401,14 +408,14 @@ syscall_handler (struct intr_frame *f) {
 				break;
 			}
 			if (fp->file)
+				user_lock_acquire();
 				f->R.rax = file_tell(fp->file);
-			break;
+				user_lock_release();
+				break;
 		}
 		case SYS_CLOSE: {                 /* Close a file. */
 			int fd = (int) f->R.rdi;
-			user_lock_acquire();
 			bool suc = remove_file_by_fd(fd);
-			user_lock_release();
 			break;
 		}
 		case SYS_DUP2: {

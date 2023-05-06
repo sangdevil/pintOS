@@ -164,7 +164,6 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 	if (thread_mlfqs) {
 		// for every interrupt
 		increment_recent_cpu();
-
 		// for every second
 		if (ticks % TIMER_FREQ == 0 ){
 			update_load_avg();
