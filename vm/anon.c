@@ -50,7 +50,7 @@ static bool
 anon_swap_in (struct page *page, void *kva) {
 	struct anon_page *anon_page = &page->anon;
 
-	//msg("swap in: Hi!");
+	// msg("swap in: Hi!");
 
 	//swap table
 	disk_sector_t sec_no = anon_page->sec_no;

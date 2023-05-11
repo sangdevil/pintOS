@@ -118,6 +118,7 @@ struct thread {
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;
+	struct mapped_file_list mmap_files;
 #endif
 
 	/* Owned by thread.c. */

@@ -1,0 +1,39 @@
+-v is a command-line argument for Pintos, a simple operating system used for teaching purposes. 
+It stands for verbose mode and tells Pintos to output additional information about what it is doing as it runs.
+
+-k is another command-line argument for Pintos that stands for "keep going." 
+When Pintos encounters an error, it will normally stop executing and print an error message. 
+The -k option tells Pintos to keep going instead, which can be useful for testing.
+
+-T 60 sets a timeout of 60 seconds for Pintos. 
+If Pintos is still running after 60 seconds, it will be forcibly terminated.
+
+-m 20 sets the amount of memory that Pintos is allowed to use to 20 megabytes. 
+This can be useful for testing Pintos on machines with limited resources.
+
+--fs-disk=10 specifies the size of the filesystem disk image that Pintos will use. 
+In this case, the disk image will be 10 megabytes in size.
+
+헷갈릴 때 보라고 정리해 둠.
+
+자주 쓰는 커맨드 여기에 적어두면 좋을듯 : 
+
+1. 테스트 채점용
+make tests/userprog/fork-recursive.result
+make tests/userprog/open-*.result
+pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/dup2-simple:dup2-simple -- -q   -f run dup2-simple
+pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/open-null:open-null -- -q   -f run open-null
+pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/open-normal:open-normal -- -q   -f run open-normal
+pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/open-bad-ptr:open-bad-ptr -- -q   -f run open-bad-ptr
+pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/read-bad-ptr:read-bad-ptr -- -q   -f run read-bad-ptr
+pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/open-twice:open-twice -- -q   -f run open-twice
+pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/read-bad-fd:read-bad-fd -- -q   -f run read-bad-fd
+pintos -v -k -T 60 -m 20   --fs-disk=10 -p tests/userprog/read-normal:read-normal -p ../../tests/userprog/sample.txt:sample.txt -- -q   -f run read-normal
+make tests/userprog/read-bad-ptr.result
+make tests/userprog/open-bad-ptr.result
+make tests/userprog/read-normal.result
+for i in {1..200}; do pintos -v -k -T 60 -m 20 --fs-disk=10 -p tests/filesys/base/syn-write:syn-write -p tests/filesys/base/child-syn-wrt:child-syn-wrt -- -q -f run syn-write < /dev/null 2>> tests/filesys/base/syn-write.errors >> tests/filesys/base/syn-write.output; done;
+
+for i in {1..200}; do pintos -v -k -T 300 -m 20 --fs-disk=10 -p tests/filesys/base/syn-read:syn-read -p tests/filesys/base/child-syn-read:child-syn-read -- -q -f run syn-read < /dev/null 2>> tests/filesys/base/syn-read.errors >> tests/filesys/base/syn-read.output; done
+
+for i in {1..30}; do pintos -v -k -T 600 -m 20 -m 20 --fs-disk=10 -p tests/userprog/no-vm/multi-oom:multi-oom -- -q -f run multi-oom < /dev/null 2>> tests/userprog/no-vm/multi-oom.errors >> tests/userprog/no-vm/multi-oom.output; done;

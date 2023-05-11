@@ -236,7 +236,6 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 	const uint8_t *buffer = buffer_;
 	off_t bytes_written = 0;
 	uint8_t *bounce = NULL;
-
 	if (inode->deny_write_cnt)
 		return 0;
 
@@ -292,6 +291,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 	void
 inode_deny_write (struct inode *inode) 
 {
+	// msg("deny called  ! ");
 	inode->deny_write_cnt++;
 	ASSERT (inode->deny_write_cnt <= inode->open_cnt);
 }

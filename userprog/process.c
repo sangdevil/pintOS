@@ -274,6 +274,7 @@ __do_fork (void *aux) {
 
 	process_activate (current);
 #ifdef VM
+	
 	supplemental_page_table_init (&current->spt);
 	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
 		goto error;
@@ -921,9 +922,6 @@ lazy_load_segment (struct page *page, void *aux) {
 	size_t page_zero_bytes = args->page_zero_bytes;
 	bool writable = args->writable;
 	free(args);
-
-	// Copied from #ifndef VM load_segment
-
 	/* Get a page of memory. */
 	struct frame *frame = page->frame;
 	void *kpage = frame->kva;
@@ -936,7 +934,7 @@ lazy_load_segment (struct page *page, void *aux) {
 	file_seek(file, ofs);
 	/* Load this page. */
 	off_t bytes = file_read (file, kpage, page_read_bytes);
-	file_close(file);
+	// file_close(file);
 	if(!user_lock_held) {
 		user_lock_release();
 	}

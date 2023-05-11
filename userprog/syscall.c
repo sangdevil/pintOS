@@ -148,7 +148,6 @@ bool validate_address(struct intr_frame *f, void *vaddr, bool write) {
 	uint64_t *pte = pml4e_walk (pml4, (uint64_t) vaddr, 0);
 	//msg("%d", *pte & PTE_P);
 	bool present = (pte && (*pte & PTE_P));
-
 	if (present && (!write || is_writable(pte)) && is_user_pte(pte)) { //no permission issue
 		return true;
 	}
@@ -361,7 +360,7 @@ syscall_handler (struct intr_frame *f) {
 			int fd = f->R.rdi;
 			const void *buffer = (const void *) f->R.rsi;
 			unsigned size = (unsigned) f->R.rdx;
-			if (!validate_address(f, buffer, true)) {
+			if (!validate_address(f, buffer, false)) {
 				thread_exit_with_status(-1);	
 				return;
 			}
@@ -376,6 +375,7 @@ syscall_handler (struct intr_frame *f) {
 					putbuf(buffer, size); // defined in lib/kernel/console.c
 					f->R.rax = size;
 				} else {
+
 					if (fp->file) {
 						user_lock_acquire();
 						f->R.rax = file_write(fp->file, buffer, size);
@@ -450,6 +450,49 @@ syscall_handler (struct intr_frame *f) {
 			f->R.rax = fd2;
 			break;
 		}
+		case SYS_MMAP: {
+			void *addr = (void *) f->R.rdi;
+			signed long length = (size_t) f->R.rsi;
+			int writable = (int) f->R.rdx;
+			int fd = (int) f->R.r10;
+			off_t offset = (off_t) f->R.r8;
+			// msg("addr : %p", addr);
+			// msg("user? : %d", is_user_vaddr(addr));
+			// addr가 적합한지를 확인, 적합한 length를 가졌는지를 확인
+			if ( !page_aligned(addr) || addr == 0 || !is_user_vaddr(addr) || !is_user_vaddr( (void *) ((size_t) addr + length) ) 
+				|| pg_ofs(addr) != 0 || length <= 0 || length < offset ){
+				f->R.rax = NULL;
+				return;
+			}
+			// 이 주소의 페이지가 사용되고 있는지 확인
+			if (spt_find_page(&thread_current()->spt, addr)) {
+				f->R.rax = NULL;
+				return;
+			}
+
+			// fd가 적합한지를 확인
+			if (fd == 0 || fd == 1) {
+				f->R.rax = NULL;
+				return;
+			}
+
+			struct file_descriptor *find_fd = find_file_descriptor_by_fd(fd); 
+			if (!find_fd) {
+				f->R.rax = NULL;
+				return;
+			}
+			f-> R.rax = do_mmap(addr, (size_t) length, writable, find_fd->file, offset);
+			break;
+			
+	
+
+		}
+	case SYS_MUNMAP: {
+		void *addr = (void *) f->R.rdi;
+		// addr = pg_round_down(addr);
+		do_munmap(addr);
+		return;
+	}
 	// thread_exit ();
 	}
 }

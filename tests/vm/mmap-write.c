@@ -22,10 +22,13 @@ test_main (void)
   CHECK ((handle = open ("sample.txt")) > 1, "open \"sample.txt\"");
   CHECK ((map = mmap (ACTUAL, 4096, 1, handle, 0)) != MAP_FAILED, "mmap \"sample.txt\"");
   memcpy (ACTUAL, sample, strlen (sample));
+  // msg("map address : %p", map);
   munmap (map);
-
+  
   /* Read back via read(). */
   read (handle, buf, strlen (sample));
+  // msg("sample : %s", sample);
+  // msg("s : %s", buf);
   CHECK (!memcmp (buf, sample, strlen (sample)),
          "compare read data against written data");
   close (handle);
